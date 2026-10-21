@@ -1,0 +1,12 @@
+visualizations/
+build
+.venv
+__pycache__
+*.pyc
+*.egg-info
+.ipynb_checkpoints
+outputs/
+output/
+datasets/*
+third_party
+*.ipynb
