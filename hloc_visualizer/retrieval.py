@@ -1,4 +1,4 @@
-"""Global-descriptor retrieval ranking and contact-sheet rendering."""
+"""全局描述子检索排序，以及检索结果拼图的生成。"""
 
 from pathlib import Path
 
@@ -9,7 +9,12 @@ from .io_utils import h5_image_names, load_descriptors, read_rgb, resolve_image
 
 
 def read_pairs(path: Path, query_names: list[str], map_names: set[str]) -> dict[str, list[str]]:
-    """Read HLoc's ordered 'query reference' pair list."""
+    """读取 HLoc 的 ``query reference`` 配对文本。
+
+    pairs 文件只有排序后的图片名，没有相似度分数；因此返回值中的分数
+    使用 ``None`` 表示。只保留当前两个全局特征文件都认识的图片，避免
+    不同运行结果混用时在后续读图阶段报错。
+    """
     pairs = {name: [] for name in query_names}
     with path.open("r", encoding="utf-8") as handle:
         for line in handle:
@@ -20,12 +25,13 @@ def read_pairs(path: Path, query_names: list[str], map_names: set[str]) -> dict[
 
 
 def rank_from_descriptors(query_file: Path, map_file: Path, top_k: int) -> dict[str, list[tuple[str, float]]]:
-    """Compute cosine-similarity rankings when no pairs text file is supplied."""
+    """没有 pairs.txt 时，直接用全局描述子计算余弦相似度并排序。"""
     query_names, map_names = h5_image_names(query_file), h5_image_names(map_file)
     if not query_names or not map_names:
         raise ValueError("Global descriptor HDF5 file contains no image keys")
     query_desc = load_descriptors(query_file, query_names)
     map_desc = load_descriptors(map_file, map_names)
+    # [Q,D] @ [D,M] -> [Q,M]，每个元素是一个 query-map 余弦相似度。
     scores = query_desc @ map_desc.T
     rankings = {}
     for row, query in enumerate(query_names):
@@ -35,7 +41,8 @@ def rank_from_descriptors(query_file: Path, map_file: Path, top_k: int) -> dict[
 
 
 def render_contact_sheet(query_path: Path, ranked: list[tuple[str, float | None]], map_root: Path, output: Path, query_name: str) -> None:
-    """Save query and ranked map images as a labeled vertical contact sheet."""
+    """保存 query 与 Top-k map 图片的竖向拼图，并标注排名/分数。"""
+    # 第一行是 query，后面按 pairs 文件顺序或相似度排序放置 map 候选。
     images = [read_rgb(query_path)] + [read_rgb(resolve_image(map_root, name)) for name, _ in ranked]
     tiles = []
     title_height, target_height = 34, 240

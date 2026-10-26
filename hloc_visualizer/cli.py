@@ -1,4 +1,4 @@
-"""Command-line entry point for HLoc visualization workflows."""
+"""命令行入口：组织全局检索拼图和局部匹配图的生成流程。"""
 
 import argparse
 import re
@@ -10,6 +10,7 @@ from .retrieval import read_pairs, rank_from_descriptors, render_contact_sheet
 
 
 def parse_args() -> argparse.Namespace:
+    """定义并校验命令行参数。"""
     parser = argparse.ArgumentParser(description="Visualize HLoc global retrieval and local feature matches.")
     parser.add_argument("--query", type=Path, default=Path(r"D:\Datasets\Indoor_query_38_38"), help="Query dataset root")
     parser.add_argument("--map", type=Path, default=Path(r"D:\Datasets\Indoor_map_51"), help="Map dataset root")
@@ -33,7 +34,12 @@ def parse_args() -> argparse.Namespace:
 
 
 def selected_rankings(args: argparse.Namespace, query_out: Path, map_out: Path):
-    """Prefer the chosen method's HLoc pairs file, otherwise rank descriptors."""
+    """确定每张 query 的候选 map 排名。
+
+    优先使用 HLoc 已生成的 pairs 文件，因为它代表实际定位流程采用的候选
+    顺序；pairs 文件不存在时，才从全局描述子重新计算余弦相似度。注意：
+    pairs 文件本身不保存分数，所以前一种路径的分数显示为 ``None``。
+    """
     query_global = args.query_global or discover(query_out, f"global-feats-{args.retrieval}*.h5", f"{args.retrieval} query descriptors")
     map_global = args.map_global or discover(map_out, f"global-feats-{args.retrieval}*.h5", f"{args.retrieval} map descriptors")
     query_names, map_names = h5_image_names(query_global), h5_image_names(map_global)
@@ -51,7 +57,9 @@ def selected_rankings(args: argparse.Namespace, query_out: Path, map_out: Path):
 
 
 def main() -> None:
+    """执行一次完整可视化任务。"""
     args = parse_args()
+    # HLoc 的产物约定放在两个数据集根目录下的 hloc_outputs/。
     query_out, map_out = args.query / "hloc_outputs", args.map / "hloc_outputs"
     rankings = selected_rankings(args, query_out, map_out)
     query_features = discover_local_features(query_out, args.query_features, "query local features")
@@ -60,8 +68,9 @@ def main() -> None:
         matches_file = args.matches
     else:
         matcher_pattern = "matches*.h5" if args.matcher == "auto" else f"matches*{args.matcher}*.h5"
-        # Prefer a match file tagged with the same retrieval method to avoid
-        # mixing correspondences generated from another candidate list.
+        # 局部匹配必须和候选列表来自同一次检索；优先选择文件名中带相同
+        # retrieval 标签的 matches 文件，避免把 MegaLoc 候选与 NetVLAD
+        # 匹配结果混用。
         candidates = sorted(query_out.glob(f"matches*{args.retrieval}*.h5"))
         if args.matcher != "auto":
             candidates = [path for path in candidates if args.matcher.lower() in path.stem.lower()]
@@ -76,6 +85,7 @@ def main() -> None:
         if not ranked:
             continue
         safe_query = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(query_name).stem)
+        # 先保存全局检索拼图；即使某个候选没有局部匹配，也仍应保留该拼图。
         render_contact_sheet(resolve_image(args.query, query_name), ranked, args.map,
                             args.output / "retrieval" / f"{safe_query}.jpg", query_name)
         for map_name, _score in ranked:
@@ -83,6 +93,8 @@ def main() -> None:
                 break
             safe_map = re.sub(r"[^A-Za-z0-9_.-]+", "_", Path(map_name).stem)
             output = args.output / "matches" / f"{safe_query}__{safe_map}.jpg"
+            # matches 文件中没有该图片对时，render_matches 返回 False，
+            # 这通常表示该候选只有检索结果、没有执行局部匹配。
             if render_matches(args.query, args.map, query_name, map_name, matches_file,
                               query_features, map_features, output, args.ransac_threshold):
                 local_count += 1
